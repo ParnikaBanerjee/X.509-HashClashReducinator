@@ -189,6 +189,57 @@
 <h2>The fix</h2>
 <p>Use a CSPRNG with at least 128 bits of entropy. In Python: <code>secrets.token_bytes(20)</code>. The CA/Browser Forum mandates it. The 2008 MD5 rogue CA attack by Sotirov et al. exploited predictable serials — it wouldn't have worked with a proper CSPRNG.</p>
 
+<hr>
+
+<h2>Signature Algorithm Binding</h2>
+<p>RFC 5280 requires the signature algorithm to appear <strong>twice</strong> in every certificate — once inside the signed payload (<code>tbsCertificate.signature</code>) and once in the outer wrapper (<code>Certificate.signatureAlgorithm</code>). A verifier must reject the cert if they differ. Without this check, an attacker can substitute a weaker outer algorithm and reuse a hash collision computed for it.</p>
+
+<h2>Pick an algorithm mode</h2>
+
+<div class="scheme active" onclick="pickAlg('bound', this)">
+  <div class="sname">Bound — inner = outer</div>
+  <div class="sdesc">both fields declare SHA-256 with RSA; mismatch check enforced</div>
+  <span class="stag g">secure</span>
+</div>
+<div class="scheme" onclick="pickAlg('mismatch', this)">
+  <div class="sname">Mismatch — inner ≠ outer</div>
+  <div class="sdesc">inner says SHA-256, outer says MD5; RFC 5280 §4.1.1.2 violation</div>
+  <span class="stag c">critical</span>
+</div>
+<div class="scheme" onclick="pickAlg('substitution', this)">
+  <div class="sname">Algorithm substitution attack</div>
+  <div class="sdesc">attacker swaps outer field to MD5 after signing; exploits lax verifiers</div>
+  <span class="stag c">critical</span>
+</div>
+
+<h2>Demo 4 — Certificate structure viewer</h2>
+<p>Build a cert and inspect both algorithm fields. The verifier outcome changes based on your chosen mode.</p>
+
+<button onclick="buildCert()">▶ Build certificate</button>
+<button onclick="runAttack()">⚡ Run substitution attack</button>
+<button onclick="resetAlgDemo()">↺ Reset</button>
+
+<div class="out" id="cert-struct" style="display:block; min-height:180px">waiting…</div>
+
+<h2>Demo 5 — Verifier check</h2>
+<p>Simulate how a strict (RFC 5280 compliant) verifier and a lax verifier each respond to the certificate built above.</p>
+
+<button onclick="runVerifiers()">▶ Run verifiers</button>
+
+<div class="stream" id="verifier-rows" style="min-height:80px"><span style="color:#252525">build a cert first…</span></div>
+
+<h2>Demo 6 — Algorithm substitution timeline</h2>
+<p>Step through how an algorithm substitution attack unfolds — and where a compliant verifier stops it.</p>
+
+<button onclick="runTimeline()">▶ Animate attack</button>
+<button onclick="resetTimeline()">↺ Reset</button>
+
+<canvas id="alg-canvas" width="660" height="160"></canvas>
+<div class="out" id="alg-log" style="display:block">waiting…</div>
+
+<h2>The binding rule (RFC 5280 §4.1.1.2)</h2>
+<p>This redundancy is deliberate: because the outer field is <em>not</em> part of the signed payload, an attacker who can produce a collision for a weak algorithm could swap it after the fact. Requiring both fields to match — and verifying that match before trusting the signature — closes the gap. Modern TLS stacks (OpenSSL ≥ 1.0, BoringSSL, NSS) reject certs with mismatched fields at parse time.</p>
+
 <script>
 let scheme = 'seq';
 let seqN = 1000;
@@ -584,6 +635,246 @@ function clearBirthday() {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── SIGNATURE ALGORITHM BINDING ──
+
+let algMode = 'bound';
+let lastCert = null;
+
+const ALG_DEFS = {
+  bound: {
+    inner: { name: 'sha256WithRSAEncryption', oid: '1.2.840.113549.1.1.11', bits: 256, safe: true },
+    outer: { name: 'sha256WithRSAEncryption', oid: '1.2.840.113549.1.1.11', bits: 256, safe: true },
+    label: 'Bound (inner = outer)',
+  },
+  mismatch: {
+    inner: { name: 'sha256WithRSAEncryption', oid: '1.2.840.113549.1.1.11', bits: 256, safe: true },
+    outer: { name: 'md5WithRSAEncryption',    oid: '1.2.840.113549.1.1.4',  bits: 128, safe: false },
+    label: 'Mismatch (inner ≠ outer)',
+  },
+  substitution: {
+    inner: { name: 'sha256WithRSAEncryption', oid: '1.2.840.113549.1.1.11', bits: 256, safe: true },
+    outer: { name: 'md5WithRSAEncryption',    oid: '1.2.840.113549.1.1.4',  bits: 128, safe: false },
+    label: 'Substitution attack',
+    attacked: true,
+  },
+};
+
+function pickAlg(mode, el) {
+  algMode = mode;
+  document.querySelectorAll('.scheme').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  resetAlgDemo();
+}
+
+function fakeSerial() {
+  const b = new Uint8Array(8); crypto.getRandomValues(b);
+  return Array.from(b).map(x => x.toString(16).padStart(2,'0')).join(':');
+}
+
+function fakeHash(algo) {
+  const len = algo.bits / 8;
+  const b = new Uint8Array(len); crypto.getRandomValues(b);
+  return Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+function fakeSig() {
+  const b = new Uint8Array(32); crypto.getRandomValues(b);
+  return Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('') + '…';
+}
+
+function buildCert() {
+  const def = ALG_DEFS[algMode];
+  const serial = fakeSerial();
+  const notBefore = new Date().toISOString().slice(0,10);
+  const notAfter  = new Date(Date.now() + 365*86400*1000).toISOString().slice(0,10);
+  const tbsHash   = fakeHash(def.inner);
+  const sig       = fakeSig();
+
+  lastCert = { def, serial, notBefore, notAfter, tbsHash, sig };
+
+  const match   = def.inner.oid === def.outer.oid;
+  const matchCls = match ? 'ok' : 'bad';
+  const matchTxt = match ? 'MATCH ✓' : 'MISMATCH ✗';
+
+  const attackNote = def.attacked
+    ? '\n<span class="bad">  ↑ attacker replaced outer field after signing — inner is still SHA-256</span>'
+    : '';
+
+  const innerSafe = def.inner.safe ? '<span class="ok">✓ safe</span>' : '<span class="bad">✗ weak</span>';
+  const outerSafe = def.outer.safe ? '<span class="ok">✓ safe</span>' : '<span class="bad">✗ weak</span>';
+
+  document.getElementById('cert-struct').innerHTML =
+    '<span class="dim">Certificate {</span>\n' +
+    '  <span class="dim">tbsCertificate {</span>\n' +
+    '    serialNumber          : <span class="hi">' + serial + '</span>\n' +
+    '    validity.notBefore    : <span class="hi">' + notBefore + '</span>\n' +
+    '    validity.notAfter     : <span class="hi">' + notAfter  + '</span>\n' +
+    '    <span class="warn">signature (inner)     : <span class="hi">' + def.inner.name + '</span>  ' + innerSafe + '</span>\n' +
+    '      OID                 : <span class="dim">' + def.inner.oid + '</span>\n' +
+    '    tbsHash               : <span class="dim">' + tbsHash.slice(0,48) + '…</span>\n' +
+    '  <span class="dim">}</span>\n' +
+    '  <span class="warn">signatureAlgorithm (outer) : <span class="hi">' + def.outer.name + '</span>  ' + outerSafe + '</span>' + attackNote + '\n' +
+    '    OID                   : <span class="dim">' + def.outer.oid + '</span>\n' +
+    '  signature               : <span class="dim">' + sig + '</span>\n' +
+    '<span class="dim">}</span>\n\n' +
+    'inner OID : <span class="hi">' + def.inner.oid + '</span>\n' +
+    'outer OID : <span class="hi">' + def.outer.oid + '</span>\n' +
+    'binding   : <span class="' + matchCls + '">' + matchTxt + '</span>';
+
+  document.getElementById('verifier-rows').innerHTML = '<span style="color:#252525">click ▶ Run verifiers…</span>';
+}
+
+async function runVerifiers() {
+  if (!lastCert) { buildCert(); await sleep(200); }
+  const { def } = lastCert;
+  const match = def.inner.oid === def.outer.oid;
+  const box = document.getElementById('verifier-rows');
+  box.innerHTML = '';
+
+  const verifiers = [
+    {
+      name: 'Strict verifier (RFC 5280 §4.1.1.2)',
+      check: () => {
+        if (!match) return { pass: false, reason: 'inner/outer algorithm OIDs differ — certificate rejected at parse time' };
+        if (!def.outer.safe) return { pass: false, reason: 'algorithm ' + def.outer.name + ' is deprecated — rejected by policy' };
+        return { pass: true, reason: 'OIDs match, algorithm is strong — signature verification proceeds' };
+      }
+    },
+    {
+      name: 'Lax verifier (pre-RFC 5280 / misconfigured)',
+      check: () => {
+        if (!def.outer.safe) return {
+          pass: 'vuln',
+          reason: 'ignores inner field; verifies only outer OID (' + def.outer.name + ') — susceptible to substitution'
+        };
+        return { pass: true, reason: 'outer OID is strong — happens to pass, but inner field was never checked' };
+      }
+    },
+  ];
+
+  for (const v of verifiers) {
+    await sleep(350);
+    const r = v.check();
+    const cls  = r.pass === true ? 'safe' : r.pass === 'vuln' ? 'hit' : 'coll';
+    const icon = r.pass === true ? '✓' : r.pass === 'vuln' ? '⚠' : '✗';
+    const row = document.createElement('div');
+    row.className = 'stream-row';
+    row.innerHTML =
+      '<span class="sr-val"><span class="' + cls + '">' + icon + ' ' + v.name + '</span>\n' +
+      '   <span class="dim">' + r.reason + '</span></span>';
+    box.appendChild(row);
+  }
+}
+
+function runAttack() {
+  algMode = 'substitution';
+  document.querySelectorAll('.scheme').forEach((e, i) => {
+    e.classList.remove('active');
+    if (i === 2) e.classList.add('active');
+  });
+  buildCert();
+}
+
+function resetAlgDemo() {
+  lastCert = null;
+  document.getElementById('cert-struct').textContent = 'waiting…';
+  document.getElementById('verifier-rows').innerHTML = '<span style="color:#252525">build a cert first…</span>';
+  resetTimeline();
+}
+
+// ── DEMO 6: timeline ──
+const TL_STEPS = [
+  { actor: 'CA',       action: 'Signs TBS with SHA-256 (inner field = sha256WithRSAEncryption)',   safe: true  },
+  { actor: 'CA',       action: 'Encodes outer signatureAlgorithm = sha256WithRSAEncryption',        safe: true  },
+  { actor: 'CA',       action: 'Issues certificate to subscriber',                                  safe: true  },
+  { actor: 'Attacker', action: 'Intercepts cert in transit — begins hash analysis on outer field',  safe: false },
+  { actor: 'Attacker', action: 'Finds MD5 collision for outer field (SHA-256 inner unchanged)',      safe: false },
+  { actor: 'Attacker', action: 'Swaps outer OID → md5WithRSAEncryption in crafted cert copy',       safe: false },
+  { actor: 'Verifier', action: '[LAX]  Reads outer OID only → accepts MD5 → forged cert trusted ✗', safe: false },
+  { actor: 'Verifier', action: '[RFC 5280]  inner OID ≠ outer OID → REJECT at parse time ✓',        safe: true  },
+];
+
+let tlTimer = null, tlStep = 0;
+
+function runTimeline() {
+  if (tlTimer) return;
+  const canvas = document.getElementById('alg-canvas');
+  canvas.width = canvas.offsetWidth;
+  tlStep = 0;
+  drawTimeline(canvas, -1);
+  tlTimer = setInterval(async () => {
+    if (tlStep >= TL_STEPS.length) { clearInterval(tlTimer); tlTimer = null; return; }
+    drawTimeline(canvas, tlStep);
+    const s = TL_STEPS[tlStep];
+    document.getElementById('alg-log').innerHTML =
+      '<span class="dim">step ' + (tlStep+1) + '/' + TL_STEPS.length + '  </span>' +
+      '<span class="' + (s.actor === 'Attacker' ? 'bad' : s.safe ? 'ok' : 'warn') + '">[' + s.actor + ']</span>  ' +
+      s.action;
+    tlStep++;
+  }, 900);
+}
+
+function drawTimeline(canvas, activeStep) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  const actors = ['CA', 'Attacker', 'Verifier'];
+  const cols   = [0.18, 0.5, 0.82];
+  const topY   = 30, botY = H - 20;
+
+  // Lifelines
+  actors.forEach((a, i) => {
+    const x = W * cols[i];
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x, topY + 14); ctx.lineTo(x, botY); ctx.stroke();
+    ctx.fillStyle = '#333'; ctx.font = '11px monospace';
+    ctx.textAlign = 'center'; ctx.fillText(a, x, topY);
+  });
+
+  if (activeStep < 0) return;
+
+  const stepH = (botY - topY - 14) / TL_STEPS.length;
+
+  TL_STEPS.slice(0, activeStep + 1).forEach((s, idx) => {
+    const y = topY + 14 + idx * stepH + stepH * 0.5;
+    const actorIdx = actors.indexOf(s.actor);
+    const x1 = W * cols[actorIdx];
+    const color = s.actor === 'Attacker' ? '#7a2020' : s.safe ? '#1e4030' : '#886600';
+    const dot = 5;
+
+    // Arrow to next actor if message
+    const nextActorIdx = idx < TL_STEPS.length - 1 ? actors.indexOf(TL_STEPS[idx+1].actor) : -1;
+    if (nextActorIdx >= 0 && nextActorIdx !== actorIdx && s.actor !== 'Attacker') {
+      const x2 = W * cols[nextActorIdx];
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([2,3]);
+      ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Dot on lifeline
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x1, y, dot, 0, Math.PI*2); ctx.fill();
+
+    // Highlight active step
+    if (idx === activeStep) {
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x1, y, dot + 4, 0, Math.PI*2); ctx.stroke();
+    }
+  });
+  ctx.textAlign = 'left';
+}
+
+function resetTimeline() {
+  if (tlTimer) { clearInterval(tlTimer); tlTimer = null; }
+  tlStep = 0;
+  const canvas = document.getElementById('alg-canvas');
+  canvas.width = canvas.offsetWidth;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('alg-log').textContent = 'waiting…';
+}
 </script>
 </body>
 </html>
