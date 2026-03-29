@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>X.509 Serial Numbers</title>
+<style>
+  body {
+    font-family: monospace;
+    background: #0e0e0e;
+    color: #bbb;
+    font-size: 14px;
+    line-height: 1.75;
+    max-width: 660px;
+    margin: 60px auto;
+    padding: 0 24px 80px;
+  }
+  h1 { font-size: 16px; color: #eee; margin-bottom: 4px; }
+  .sub { color: #444; margin-bottom: 40px; }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .1em;
+    color: #444; margin: 44px 0 12px; padding-bottom: 6px;
+    border-bottom: 1px solid #191919;
+  }
+  p { color: #666; margin-bottom: 10px; }
+  p strong { color: #999; font-weight: normal; }
+  hr { border: none; border-top: 1px solid #191919; margin: 40px 0; }
+  code { background: #141414; padding: 1px 6px; color: #999; }
+
+  .scheme {
+    border: 1px solid #1e1e1e; padding: 11px 14px; margin-bottom: 7px;
+    cursor: pointer; position: relative; transition: border-color .12s;
+  }
+  .scheme:hover  { border-color: #333; }
+  .scheme.active { border-color: #555; background: #111; }
+  .sname { color: #ccc; margin-bottom: 2px; }
+  .sdesc { color: #444; font-size: 12px; }
+  .stag  { position: absolute; top: 11px; right: 14px; font-size: 11px; }
+  .stag.c { color: #993333; }
+  .stag.w { color: #886600; }
+  .stag.g { color: #3a7a50; }
+
+  .ent-row { margin-bottom: 9px; }
+  .ent-label { display: flex; justify-content: space-between; font-size: 11px; color: #444; margin-bottom: 3px; }
+  .ent-track { height: 4px; background: #141414; }
+  .ent-fill  { height: 100%; transition: width .5s ease; width: 0; }
+
+  button {
+    font-family: monospace; font-size: 13px; padding: 7px 15px;
+    background: #111; color: #888; border: 1px solid #222;
+    cursor: pointer; margin-top: 10px; margin-right: 6px; transition: all .12s;
+  }
+  button:hover { border-color: #444; color: #ccc; }
+
+  .out {
+    background: #080808; border: 1px solid #171717; padding: 14px 16px;
+    font-size: 13px; white-space: pre-wrap; line-height: 1.9;
+    margin-top: 12px; color: #555;
+  }
+
+  .stream {
+    background: #080808; border: 1px solid #171717; padding: 14px 16px;
+    font-size: 13px; line-height: 2; margin-top: 12px; min-height: 60px;
+  }
+  .stream-row { display: flex; gap: 12px; border-bottom: 1px solid #0f0f0f; }
+  .stream-row:last-child { border: none; }
+  .sr-idx  { color: #252525; width: 60px; flex-shrink: 0; }
+  .sr-val  { color: #ccc; flex: 1; word-break: break-all; }
+  .sr-note { font-size: 11px; color: #444; flex-shrink: 0; align-self: center; }
+  .sr-note.hit  { color: #993333; }
+  .sr-note.coll { color: #993333; }
+  .sr-note.safe { color: #3a7a50; }
+
+  .counters { display: flex; gap: 28px; margin-top: 14px; font-size: 12px; color: #333; }
+  .counters span { display: flex; flex-direction: column; gap: 2px; }
+  .counters b { font-size: 20px; color: #ccc; font-weight: normal; }
+  .counters b.red { color: #993333; }
+
+  .heatmap {
+    display: flex; flex-wrap: wrap; gap: 2px; margin-top: 12px;
+    background: #080808; border: 1px solid #171717; padding: 14px;
+  }
+  .hcell { width: 9px; height: 9px; background: #141414; border-radius: 1px; }
+
+  canvas {
+    display: block; width: 100%; height: 130px; margin-top: 12px;
+    background: #080808; border: 1px solid #171717;
+  }
+
+  .bad  { color: #993333; }
+  .warn { color: #886600; }
+  .ok   { color: #3a7a50; }
+  .hi   { color: #ccc; }
+  .dim  { color: #333; }
+</style>
+</head>
+<body>
+
+<h1>X.509 Certificate Serial Numbers</h1>
+<p class="sub">What they are, why they matter, and what breaks when they're weak.</p>
+
+<h2>Background</h2>
+<p>Every X.509 certificate has a serial number — a unique ID the CA assigns at issuance. It's used for revocation (CRL/OCSP), auditing, and preventing cert substitution. RFC 5280 says it must be a unique positive integer, up to 20 bytes. It says nothing about how to generate one. That gap is where vulnerabilities live.</p>
+
+<h2>Pick a scheme</h2>
+<p>All three demos below respond to whichever scheme is selected.</p>
+
+<div class="scheme active" onclick="pick('seq',this)">
+  <div class="sname">Sequential counter</div>
+  <div class="sdesc">1, 2, 3 … increment on each issuance</div>
+  <span class="stag c">critical</span>
+</div>
+<div class="scheme" onclick="pick('ts',this)">
+  <div class="sname">Unix timestamp</div>
+  <div class="sdesc">current time in seconds</div>
+  <span class="stag c">critical</span>
+</div>
+<div class="scheme" onclick="pick('weak',this)">
+  <div class="sname">Weak random — 20-bit</div>
+  <div class="sdesc">random, but only ~1 million possible values</div>
+  <span class="stag w">high risk</span>
+</div>
+<div class="scheme" onclick="pick('strong',this)">
+  <div class="sname">Cryptographic — 128-bit</div>
+  <div class="sdesc">CSPRNG, 2¹²⁸ possible values</div>
+  <span class="stag g">recommended</span>
+</div>
+
+<div style="margin-top:18px">
+  <div class="ent-row">
+    <div class="ent-label"><span>Sequential</span><span id="e0">—</span></div>
+    <div class="ent-track"><div class="ent-fill" id="b0" style="background:#7a2020"></div></div>
+  </div>
+  <div class="ent-row">
+    <div class="ent-label"><span>Timestamp</span><span id="e1">—</span></div>
+    <div class="ent-track"><div class="ent-fill" id="b1" style="background:#7a2020"></div></div>
+  </div>
+  <div class="ent-row">
+    <div class="ent-label"><span>Weak random</span><span id="e2">—</span></div>
+    <div class="ent-track"><div class="ent-fill" id="b2" style="background:#7a6020"></div></div>
+  </div>
+  <div class="ent-row">
+    <div class="ent-label"><span>Strong random</span><span id="e3">—</span></div>
+    <div class="ent-track"><div class="ent-fill" id="b3" style="background:#2a6040"></div></div>
+  </div>
+</div>
+
+<hr>
+
+<h2>Demo 1 — Predictability</h2>
+<p>Certs issue every half second. For sequential and timestamp schemes, the attacker's guess is shown beside each serial — it's right every time. With 128-bit CSPRNG, the next serial is impossible to guess.</p>
+
+<button onclick="streamStart()">▶ Start</button>
+<button onclick="streamStop()">■ Stop</button>
+<button onclick="streamReset()">↺ Reset</button>
+
+<div class="stream" id="stream-rows"><span style="color:#252525">waiting…</span></div>
+
+<div class="counters">
+  <span><b id="c-issued">0</b>certs issued</span>
+  <span><b id="c-hits" >0</b>attacker hits</span>
+  <span><b id="c-rate">—</b>hit rate</span>
+  <span><b id="c-coll">0</b>collisions</span>
+</div>
+
+<hr>
+
+<h2>Demo 2 — Collision heatmap</h2>
+<p>Issue 2,000 certs and watch the address space fill up. Each square is a slot. Green means a cert landed there. Red means two or more certs landed in the same slot — a collision.</p>
+
+<button onclick="runHeatmap()">Run (n = 2,000)</button>
+<button onclick="clearHeatmap()">Clear</button>
+
+<div class="heatmap" id="heatmap"></div>
+<div class="out" id="hmap-log" style="display:block">waiting…</div>
+
+<hr>
+
+<h2>Demo 3 — Birthday paradox</h2>
+<p>Each bar is one trial: issue certs until the first collision, record how many it took. The dashed line is the theoretical 50% threshold. Below it is bad.</p>
+
+<button onclick="runBirthday()">Run 10 trials</button>
+<button onclick="clearBirthday()">Clear</button>
+
+<canvas id="bday-canvas" width="660" height="130"></canvas>
+<div class="out" id="bday-log" style="display:block">waiting…</div>
+
+<hr>
+
+<h2>The fix</h2>
+<p>Use a CSPRNG with at least 128 bits of entropy. In Python: <code>secrets.token_bytes(20)</code>. The CA/Browser Forum mandates it. The 2008 MD5 rogue CA attack by Sotirov et al. exploited predictable serials — it wouldn't have worked with a proper CSPRNG.</p>
+
+<script>
+let scheme = 'seq';
+let seqN = 1000;
+
+// ── entropy bars ──
+const entBits = { seq: 0.1, ts: 5, weak: 20, strong: 128 };
+function updateEntropy() {
+  [['seq',0],['ts',1],['weak',2],['strong',3]].forEach(([s,i]) => {
+    const v = entBits[s], pct = (v / 128) * 100;
+    document.getElementById('b'+i).style.width = Math.max(pct, 0.3) + '%';
+    document.getElementById('e'+i).textContent = v < 1 ? '<1 bit' : v + ' bits';
+  });
+}
+updateEntropy();
+
+function pick(s, el) {
+  scheme = s;
+  document.querySelectorAll('.scheme').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  streamReset();
+  clearHeatmap();
+  clearBirthday();
+}
+
+// ── generators ──
+function gen() {
+  if (scheme === 'seq')  return seqN++;
+  if (scheme === 'ts')   return Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 3);
+  if (scheme === 'weak') return Math.floor(Math.random() * (1 << 20));
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  return Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+// ── DEMO 1: stream ──
+let stTimer=null, stIdx=0, stSeen=new Set(), stColls=0, stHits=0, stAttempts=0, stLast=null;
+
+function streamStart() { if (!stTimer) stTimer = setInterval(tick, 500); }
+function streamStop()  { clearInterval(stTimer); stTimer = null; }
+function streamReset() {
+  streamStop(); stIdx=0; stSeen=new Set(); stColls=0; stHits=0; stAttempts=0; stLast=null; seqN=1000;
+  document.getElementById('stream-rows').innerHTML = '<span style="color:#252525">waiting…</span>';
+  document.getElementById('c-issued').textContent = '0';
+  document.getElementById('c-hits').textContent   = '0';
+  document.getElementById('c-hits').className     = '';
+  document.getElementById('c-rate').textContent   = '—';
+  document.getElementById('c-coll').textContent   = '0';
+  document.getElementById('c-coll').className     = '';
+}
+
+function tick() {
+  if (stIdx >= 50) { streamStop(); return; }
+  const serial = gen();
+  const isNum  = typeof serial === 'number';
+  const isDup  = stSeen.has(serial);
+  if (isDup) stColls++; else stSeen.add(serial);
+
+  let noteClass = '', noteText = '';
+  if (isDup) {
+    noteClass = 'coll'; noteText = 'collision';
+  } else if (stLast !== null && (scheme === 'seq' || scheme === 'ts')) {
+    stAttempts++;
+    if (stLast + 1 === serial) { stHits++; noteClass = 'hit'; noteText = 'predicted ✓'; }
+    else noteText = 'missed';
+  } else if (scheme === 'weak') {
+    noteText = 'brute-forceable';
+  } else {
+    noteClass = 'safe'; noteText = 'unpredictable';
+  }
+
+  const display = isNum ? serial : serial.slice(0,24) + '…';
+  const row = document.createElement('div');
+  row.className = 'stream-row';
+  row.innerHTML = '<span class="sr-idx">cert #'+(stIdx+1)+'</span><span class="sr-val">'+display+'</span><span class="sr-note '+noteClass+'">'+noteText+'</span>';
+
+  const box = document.getElementById('stream-rows');
+  if (box.querySelector('span[style]')) box.innerHTML = '';
+  box.appendChild(row);
+  if (box.children.length > 10) box.removeChild(box.firstChild);
+
+  stLast = isNum ? serial : null;
+  stIdx++;
+
+  document.getElementById('c-issued').textContent = stIdx;
+  const hEl = document.getElementById('c-hits');
+  hEl.textContent = stHits; hEl.className = stHits > 0 ? 'red' : '';
+  document.getElementById('c-rate').textContent = stAttempts > 0 ? (stHits/stAttempts*100).toFixed(0)+'%' : '—';
+  const cEl = document.getElementById('c-coll');
+  cEl.textContent = stColls; cEl.className = stColls > 0 ? 'red' : '';
+}
+
+// ── DEMO 2: heatmap ──
+// CELLS must be a power of 2 so modulo is unbiased for all power-of-2 spaces
+// We use 256 cells so that 86400 and 2^20 both map via proportional scaling, not modulo
+const CELLS = 256;
+
+function initHeatmap() {
+  const el = document.getElementById('heatmap');
+  el.innerHTML = '';
+  for (let i = 0; i < CELLS; i++) {
+    const c = document.createElement('div');
+    c.className = 'hcell'; c.id = 'hc'+i; el.appendChild(c);
+  }
+}
+initHeatmap();
+
+// Map a serial value to a cell index, proportionally (no modulo bias)
+function toCell(serial, scheme) {
+  if (scheme === 'seq') {
+    // sequential: just wrap by CELLS — each cert advances one slot
+    return serial % CELLS;
+  }
+  if (scheme === 'ts') {
+    // timestamp space: 0..86399 → 0..CELLS-1 proportionally
+    const v = Math.floor(Math.random() * 86400);
+    return Math.floor(v / 86400 * CELLS);
+  }
+  if (scheme === 'weak') {
+    // 20-bit space: 0..1048575 → 0..CELLS-1 proportionally
+    const v = Math.floor(Math.random() * (1 << 20));
+    return Math.floor(v / (1 << 20) * CELLS);
+  }
+  // strong: uniform random over CELLS directly — no bias possible
+  return Math.floor(Math.random() * CELLS);
+}
+
+async function runHeatmap() {
+  clearHeatmap();
+  const N = 2000;
+  const hits = new Array(CELLS).fill(0);
+  let collisions = 0;
+  let seqI = 0; // sequential counter just for heatmap
+
+  document.getElementById('hmap-log').textContent = 'issuing…';
+
+  for (let i = 0; i < N; i++) {
+    let idx;
+    if (scheme === 'seq') {
+      idx = seqI++ % CELLS;
+    } else if (scheme === 'ts') {
+      const v = Math.floor(Math.random() * 86400);
+      idx = Math.floor(v / 86400 * CELLS);
+    } else if (scheme === 'weak') {
+      const v = Math.floor(Math.random() * (1 << 20));
+      idx = Math.floor(v / (1 << 20) * CELLS);
+    } else {
+      // strong: use a 65536-wide virtual space so 2000 certs almost never collide
+      // this correctly represents the astronomically large real space
+      const VSPACE = 65536;
+      const v = Math.floor(Math.random() * VSPACE);
+      idx = Math.floor(v / VSPACE * CELLS);
+    }
+
+    idx = Math.min(Math.max(idx, 0), CELLS - 1);
+    hits[idx]++;
+    const c = document.getElementById('hc'+idx);
+    if (hits[idx] === 1) {
+      c.style.background = '#1e4030';
+    } else {
+      c.style.background = '#7a2020';
+      if (hits[idx] === 2) collisions++;
+    }
+    if (i % 40 === 0) await sleep(8);
+  }
+
+  const used = hits.filter(x => x > 0).length;
+  const logEl = document.getElementById('hmap-log');
+
+  const msgs = {
+    seq:
+      'scheme: sequential   n = 2,000\n' +
+      'serials fill left to right in order, wrapping after '+CELLS+' certs\n' +
+      'collisions: <span class="warn">'+collisions+'</span>  (wraps = second pass overwrites slots)\n\n' +
+      '<span class="warn">no random collisions, but completely predictable — the attacker always knows the next slot.</span>',
+
+    ts:
+      'scheme: timestamp   n = 2,000\n' +
+      '86,400 values (seconds/day) distributed across '+CELLS+' slots\n' +
+      'slots used: '+used+' / '+CELLS+'   collisions: <span class="bad">'+collisions+'</span>\n\n' +
+      '<span class="bad">small time space causes heavy clustering. predictable and collision-prone.</span>',
+
+    weak:
+      'scheme: weak random (20-bit)   n = 2,000\n' +
+      '1,048,576 values distributed across '+CELLS+' display slots\n' +
+      'slots used: '+used+' / '+CELLS+'   collisions: <span class="bad">'+collisions+'</span>\n\n' +
+      '<span class="bad">birthday collision expected at ~1,177 certs. you can see it happening above.</span>',
+
+    strong:
+      'scheme: cryptographic 128-bit   n = 2,000\n' +
+      '2¹²⁸ possible values — shown here as uniform random across '+CELLS+' display slots\n' +
+      'slots used: '+used+' / '+CELLS+'   collisions in this grid: <span class="ok">'+collisions+'</span>\n\n' +
+      '<span class="ok">any collisions here are a display artefact — '+CELLS+' cells cannot represent 2¹²⁸ values.\nin the actual serial space, expect zero collisions until ~2.6 × 10¹⁹ certs.</span>',
+  };
+
+  logEl.innerHTML = msgs[scheme];
+}
+
+function clearHeatmap() {
+  for (let i = 0; i < CELLS; i++) {
+    const c = document.getElementById('hc'+i);
+    if (c) c.style.background = '';
+  }
+  document.getElementById('hmap-log').textContent = 'waiting…';
+}
+
+// ── DEMO 3: birthday paradox ──
+let bdTrials = [];
+
+function birthdayTrial() {
+  const space = scheme === 'ts' ? 86400 : (1 << 20);
+  const seen = new Set(); let n = 0;
+  while (true) {
+    const v = Math.floor(Math.random() * space);
+    n++;
+    if (seen.has(v)) return n;
+    seen.add(v);
+    if (n > space) return n; // safety
+  }
+}
+
+async function runBirthday() {
+  const log    = document.getElementById('bday-log');
+  const canvas = document.getElementById('bday-canvas');
+  canvas.width = canvas.offsetWidth;
+
+  if (scheme === 'seq') {
+    log.innerHTML =
+      '<span class="dim">sequential serials never collide by construction — each is unique.\n' +
+      'predictability is the problem here, not collisions.\n' +
+      'birthday paradox does not apply.</span>';
+    drawBdayEmpty(canvas);
+    return;
+  }
+
+  if (scheme === 'strong') {
+    log.innerHTML =
+      'scheme: <span class="hi">cryptographic 128-bit</span>\n' +
+      'space: 2¹²⁸  ≈  3.4 × 10³⁸ values\n' +
+      '50% collision threshold: ~2.6 × 10¹⁹ certs\n\n' +
+      'chart shows 10 simulated weak (20-bit) trials hitting the threshold,\nversus where strong sits on the same scale — essentially zero.\n\n' +
+      '<span class="ok">birthday paradox is escaped. the threshold is so far away it cannot be drawn.</span>';
+    drawBdayStrong(canvas);
+    return;
+  }
+
+  const space = scheme === 'ts' ? 86400 : (1 << 20);
+  const theoretical = Math.round(Math.sqrt(2 * space * Math.log(2)));
+  log.textContent = 'running…';
+
+  for (let t = 0; t < 10; t++) {
+    bdTrials.push(birthdayTrial());
+    drawBday(canvas, theoretical);
+    await sleep(60);
+  }
+
+  const vals = bdTrials;
+  const avg = Math.round(vals.reduce((a,b) => a+b, 0) / vals.length);
+  const mn  = Math.min(...vals);
+  const mx  = Math.max(...vals);
+
+  log.innerHTML =
+    'scheme: <span class="hi">' + (scheme === 'ts' ? 'timestamp' : 'weak random 20-bit') + '</span>\n' +
+    'space: 2^' + Math.round(Math.log2(space)) + '  (' + space.toLocaleString() + ' values)\n' +
+    '50% threshold: ~' + theoretical.toLocaleString() + ' certs\n\n' +
+    'earliest collision: cert <span class="bad">#' + mn.toLocaleString() + '</span>\n' +
+    'latest collision:   cert <span class="warn">#' + mx.toLocaleString() + '</span>\n' +
+    'average:            cert <span class="hi">#' + avg.toLocaleString() + '</span>';
+}
+
+function drawBday(canvas, theoretical) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t: 20, b: 10, l: 6, r: 6 };
+  ctx.fillStyle = '#080808'; ctx.fillRect(0, 0, W, H);
+  if (!bdTrials.length) return;
+
+  const maxV = Math.max(...bdTrials, theoretical * 1.5);
+  const iW   = W - P.l - P.r;
+  const iH   = H - P.t - P.b;
+  const barW = Math.max(4, iW / (bdTrials.length * 1.5));
+
+  // threshold line
+  const ty = P.t + iH * (1 - theoretical / maxV);
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+  ctx.beginPath(); ctx.moveTo(P.l, ty); ctx.lineTo(W - P.r, ty); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#333'; ctx.font = '10px monospace';
+  ctx.fillText('50% threshold  (~' + theoretical.toLocaleString() + ' certs)', P.l + 4, ty - 5);
+
+  bdTrials.forEach((v, i) => {
+    const x  = P.l + (i / bdTrials.length) * iW;
+    const bH = iH * (v / maxV);
+    const y  = P.t + iH - bH;
+    ctx.fillStyle = v < theoretical * 0.7 ? '#7a2020' : v < theoretical ? '#886600' : '#1e4030';
+    ctx.fillRect(x, y, barW - 1, bH);
+  });
+}
+
+function drawBdayEmpty(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#252525'; ctx.font = '12px monospace';
+  ctx.fillText('not applicable for sequential', 14, canvas.height / 2 + 4);
+}
+
+function drawBdayStrong(canvas) {
+  // Show a side-by-side comparison: 10 weak (20-bit) trials vs 1 strong bar
+  // Both on the same Y scale so the contrast is visceral
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t: 22, b: 28, l: 6, r: 6 };
+  const iW = W - P.l - P.r;
+  const iH = H - P.t - P.b;
+
+  ctx.fillStyle = '#080808'; ctx.fillRect(0, 0, W, H);
+
+  // Simulate 10 weak trials for comparison
+  const weakSpace = 1 << 20;
+  const weakThreshold = Math.round(Math.sqrt(2 * weakSpace * Math.log(2)));
+  const weakTrials = [];
+  for (let t = 0; t < 10; t++) {
+    const seen = new Set(); let n = 0;
+    while (true) { const v = Math.floor(Math.random() * weakSpace); n++; if (seen.has(v)) break; seen.add(v); if (n > weakSpace) break; }
+    weakTrials.push(n);
+  }
+
+  // Scale: maxV = weakThreshold * 2 so weak bars sit nicely mid-chart
+  // Strong threshold is 2.6e19 — astronomically higher, shown as offscreen arrow
+  const maxV = weakThreshold * 2.2;
+
+  // Draw threshold line for weak
+  const ty = P.t + iH * (1 - weakThreshold / maxV);
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+  ctx.beginPath(); ctx.moveTo(P.l, ty); ctx.lineTo(W - P.r, ty); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#555'; ctx.font = '10px monospace';
+  ctx.fillText('weak 50% threshold (~' + weakThreshold.toLocaleString() + ' certs)', P.l + 4, ty - 5);
+
+  // Draw weak trial bars (left 70% of chart)
+  const weakZoneW = iW * 0.68;
+  const barW = Math.max(4, weakZoneW / (weakTrials.length * 1.6));
+  weakTrials.forEach((v, i) => {
+    const x  = P.l + (i / weakTrials.length) * weakZoneW;
+    const bH = iH * Math.min(v / maxV, 1);
+    const y  = P.t + iH - bH;
+    ctx.fillStyle = v < weakThreshold ? '#7a2020' : '#886600';
+    ctx.fillRect(x, y, barW - 1, bH);
+  });
+
+  // Label weak zone
+  ctx.fillStyle = '#444'; ctx.font = '10px monospace';
+  ctx.fillText('weak (20-bit)', P.l + 4, H - 10);
+
+  // Divider
+  const divX = P.l + weakZoneW + 16;
+  ctx.strokeStyle = '#1e1e1e'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(divX, P.t); ctx.lineTo(divX, P.t + iH); ctx.stroke();
+
+  // Strong bar: 2,000 certs in 2^128 space = essentially 0 progress toward threshold
+  // Show as a 1px sliver at the very bottom with an upward arrow showing threshold is way off screen
+  const strongX = divX + 20;
+  const strongBarW = 28;
+  // 2000 / 2.6e19 of the way to threshold — rounds to 0 pixels, show 2px minimum
+  ctx.fillStyle = '#1e4030';
+  ctx.fillRect(strongX, P.t + iH - 2, strongBarW, 2);
+
+  // Arrow pointing way up off screen
+  ctx.strokeStyle = '#2a6040'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(strongX + strongBarW/2, P.t + iH - 4);
+  ctx.lineTo(strongX + strongBarW/2, P.t + 4);
+  ctx.stroke();
+  // arrowhead
+  ctx.beginPath();
+  ctx.moveTo(strongX + strongBarW/2 - 4, P.t + 10);
+  ctx.lineTo(strongX + strongBarW/2, P.t + 3);
+  ctx.lineTo(strongX + strongBarW/2 + 4, P.t + 10);
+  ctx.stroke();
+
+  ctx.fillStyle = '#3a7a50'; ctx.font = '10px monospace';
+  ctx.fillText('strong', strongX - 2, H - 10);
+  ctx.fillStyle = '#2a6040';
+  ctx.fillText('threshold', strongX - 8, P.t - 4);
+  ctx.fillText('→ 2.6×10¹⁹', strongX - 8, P.t + 8);
+}
+
+function clearBirthday() {
+  bdTrials = [];
+  const canvas = document.getElementById('bday-canvas');
+  canvas.width = canvas.offsetWidth;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  document.getElementById('bday-log').textContent = 'waiting…';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
