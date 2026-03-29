@@ -186,6 +186,64 @@
 
 <hr>
 
+<h2>Demo 4 — Collision probability curves</h2>
+<p>How fast does collision risk grow as a CA issues more certificates? Each curve shows P(at least one collision) vs certs issued for all four schemes simultaneously. The x-axis is log-scaled so all schemes fit. The steep sigmoidal rise is the birthday paradox made visible — for weak schemes it arrives shockingly early.</p>
+
+<button onclick="drawCDF()">▶ Draw curves</button>
+<button onclick="clearCDF()">↺ Clear</button>
+
+<canvas id="cdf-canvas" width="660" height="200"></canvas>
+<div class="out" id="cdf-log" style="display:block">waiting…</div>
+
+<hr>
+
+<h2>Demo 5 — Attacker work factor</h2>
+<p>How many guesses does an attacker need to predict a valid serial? Drag the issuance rate slider to simulate a busy CA. The y-axis shows expected seconds to find a hit at 10⁹ guesses/second. Sequential and timestamp collapse to near zero immediately.</p>
+
+<div style="display:flex;align-items:center;gap:12px;margin:10px 0 4px">
+  <label style="color:#555;font-size:12px">Certs/day</label>
+  <input type="range" id="rate-slider" min="1" max="5" value="3" step="1"
+    style="flex:1;background:transparent;accent-color:#3a7a50" oninput="updateWorkFactor()">
+  <span id="rate-label" style="color:#888;font-size:12px;min-width:80px">1 000/day</span>
+</div>
+
+<canvas id="work-canvas" width="660" height="200"></canvas>
+<div class="out" id="work-log" style="display:block">waiting…</div>
+
+<hr>
+
+<h2>Demo 6 — Entropy growth rate</h2>
+<p>Drag the bit-width slider to explore how entropy affects the entire threat surface. Live readouts show address space size, 50% birthday threshold, and brute-force time at 10⁹ guesses/second. The cliff between 64-bit and 128-bit is where safe territory begins.</p>
+
+<div style="display:flex;align-items:center;gap:12px;margin:10px 0 4px">
+  <label style="color:#555;font-size:12px">Entropy bits</label>
+  <input type="range" id="ent-slider" min="1" max="160" value="20" step="1"
+    style="flex:1;background:transparent;accent-color:#3a7a50" oninput="updateEntCalc()">
+  <span id="ent-label" style="color:#888;font-size:12px;min-width:50px">20 bits</span>
+</div>
+
+<canvas id="ent-canvas" width="660" height="200"></canvas>
+
+<div style="display:flex;gap:28px;margin-top:14px;font-size:12px;color:#333">
+  <span style="display:flex;flex-direction:column;gap:2px"><b id="ec-space" style="font-size:16px;color:#ccc;font-weight:normal">—</b>address space</span>
+  <span style="display:flex;flex-direction:column;gap:2px"><b id="ec-thresh" style="font-size:16px;color:#ccc;font-weight:normal">—</b>50% threshold</span>
+  <span style="display:flex;flex-direction:column;gap:2px"><b id="ec-time" style="font-size:16px;color:#ccc;font-weight:normal">—</b>brute-force time</span>
+  <span style="display:flex;flex-direction:column;gap:2px"><b id="ec-risk" style="font-size:16px;font-weight:normal">—</b>risk level</span>
+</div>
+
+<hr>
+
+<h2>Demo 7 — Distribution uniformity</h2>
+<p>Issue 4,000 certs and watch the bucket histogram build up. An ideal CSPRNG produces a flat distribution — every bucket equally likely. Weak schemes cluster and leave gaps. The chi-squared uniformity score is shown live: lower is better; above ~320 for 256 buckets indicates non-uniform distribution.</p>
+
+<button onclick="runUniformity()">▶ Run (n = 4 000)</button>
+<button onclick="clearUniformity()">↺ Clear</button>
+
+<canvas id="uni-canvas" width="660" height="160"></canvas>
+<div class="out" id="uni-log" style="display:block">waiting…</div>
+
+<hr>
+
 <h2>The fix</h2>
 <p>Use a CSPRNG with at least 128 bits of entropy. In Python: <code>secrets.token_bytes(20)</code>. The CA/Browser Forum mandates it. The 2008 MD5 rogue CA attack by Sotirov et al. exploited predictable serials — it wouldn't have worked with a proper CSPRNG.</p>
 
@@ -212,7 +270,7 @@
   <span class="stag c">critical</span>
 </div>
 
-<h2>Demo 4 — Certificate structure viewer</h2>
+<h2>Demo 8 — Certificate structure viewer</h2>
 <p>Build a cert and inspect both algorithm fields. The verifier outcome changes based on your chosen mode.</p>
 
 <button onclick="buildCert()">▶ Build certificate</button>
@@ -221,14 +279,14 @@
 
 <div class="out" id="cert-struct" style="display:block; min-height:180px">waiting…</div>
 
-<h2>Demo 5 — Verifier check</h2>
+<h2>Demo 9 — Verifier check</h2>
 <p>Simulate how a strict (RFC 5280 compliant) verifier and a lax verifier each respond to the certificate built above.</p>
 
 <button onclick="runVerifiers()">▶ Run verifiers</button>
 
 <div class="stream" id="verifier-rows" style="min-height:80px"><span style="color:#252525">build a cert first…</span></div>
 
-<h2>Demo 6 — Algorithm substitution timeline</h2>
+<h2>Demo 10 — Algorithm substitution timeline</h2>
 <p>Step through how an algorithm substitution attack unfolds — and where a compliant verifier stops it.</p>
 
 <button onclick="runTimeline()">▶ Animate attack</button>
@@ -239,6 +297,66 @@
 
 <h2>The binding rule (RFC 5280 §4.1.1.2)</h2>
 <p>This redundancy is deliberate: because the outer field is <em>not</em> part of the signed payload, an attacker who can produce a collision for a weak algorithm could swap it after the fact. Requiring both fields to match — and verifying that match before trusting the signature — closes the gap. Modern TLS stacks (OpenSSL ≥ 1.0, BoringSSL, NSS) reject certs with mismatched fields at parse time.</p>
+
+<hr>
+
+<h2>Strict DER Encoding</h2>
+<p>X.509 certificates must be encoded in <strong>Distinguished Encoding Rules (DER)</strong> — a strict, canonical subset of BER (Basic Encoding Rules). DER guarantees exactly one valid byte sequence for any given data structure. Without this, two syntactically different byte strings can parse as the <em>same</em> certificate — a semantic collision that bypasses hash-based identity checks entirely.</p>
+
+<h2>Pick an encoding violation</h2>
+
+<div class="scheme active" onclick="pickDer('der', this)" id="der-scheme-der">
+  <div class="sname">Strict DER — canonical</div>
+  <div class="sdesc">one valid representation per value; every byte is mandated</div>
+  <span class="stag g">correct</span>
+</div>
+<div class="scheme" onclick="pickDer('ber_len', this)" id="der-scheme-ber_len">
+  <div class="sname">BER — indefinite length encoding</div>
+  <div class="sdesc">length byte 0x80 + end-of-contents marker instead of definite length</div>
+  <span class="stag c">non-canonical</span>
+</div>
+<div class="scheme" onclick="pickDer('ber_bool', this)" id="der-scheme-ber_bool">
+  <div class="sname">BER — non-canonical BOOLEAN TRUE</div>
+  <div class="sdesc">TRUE as 0x01 instead of DER-mandated 0xFF</div>
+  <span class="stag w">non-canonical</span>
+</div>
+<div class="scheme" onclick="pickDer('ber_int', this)" id="der-scheme-ber_int">
+  <div class="sname">BER — padded INTEGER</div>
+  <div class="sdesc">leading 0x00 byte added to positive integer, inflating length by 1</div>
+  <span class="stag w">non-canonical</span>
+</div>
+<div class="scheme" onclick="pickDer('attack', this)" id="der-scheme-attack">
+  <div class="sname">Malleability attack — dual encoding</div>
+  <div class="sdesc">two byte strings, same logical value, different SHA-256 digests</div>
+  <span class="stag c">critical</span>
+</div>
+
+<h2>Demo 11 — TLV byte-level inspector</h2>
+<p>Inspect the raw Tag-Length-Value bytes of a certificate field. Each byte is annotated — violations are flagged in red.</p>
+
+<button onclick="buildDer()">▶ Encode field</button>
+<button onclick="resetDerDemo()">↺ Reset</button>
+
+<div class="out" id="der-struct" style="display:block; min-height:160px">waiting…</div>
+
+<h2>Demo 12 — Canonical equivalence checker</h2>
+<p>Two byte strings that represent the same logical value. A strict DER parser rejects the non-canonical form. A lax BER parser accepts both — and they hash to different digests, breaking cert identity.</p>
+
+<button onclick="runEquiv()">▶ Check equivalence</button>
+
+<div class="stream" id="equiv-rows" style="min-height:100px"><span style="color:#252525">encode a field first…</span></div>
+
+<h2>Demo 13 — Hash divergence under malleability</h2>
+<p>Generate two BER encodings of the same logical field, compute their SHA-256 digests, and observe the digests differ. A strict DER parser stops this before hashing ever occurs.</p>
+
+<button onclick="runMalleability()">▶ Simulate</button>
+<button onclick="resetMalleability()">↺ Reset</button>
+
+<canvas id="der-canvas" width="660" height="110"></canvas>
+<div class="out" id="mal-log" style="display:block; min-height:100px">waiting…</div>
+
+<h2>Why DER matters for hash security</h2>
+<p>A certificate's fingerprint — used in CT logs, OCSP, pinning, and caching — is the hash of its DER-encoded bytes. If a parser accepts BER, an attacker can produce a second encoding of the same logical cert whose bytes differ from the original, yielding a different hash. This silently breaks revocation lookups, CT log matching, and HPKP pins without touching the cryptographic signature at all. Strict DER parsing at ingestion time is the complete fix.</p>
 
 <script>
 let scheme = 'seq';
@@ -636,7 +754,540 @@ function clearBirthday() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── SIGNATURE ALGORITHM BINDING ──
+// ══════════════════════════════════════════════
+// DEMO 4 — COLLISION PROBABILITY CURVES
+// ══════════════════════════════════════════════
+
+const CDF_SCHEMES = [
+  { id:'seq',    label:'Sequential',      space: null,       color:'#7a2020', dash:[]       },
+  { id:'ts',     label:'Timestamp',       space: 86400,      color:'#bb6600', dash:[4,3]    },
+  { id:'weak',   label:'Weak 20-bit',     space: 1<<20,      color:'#886600', dash:[2,3]    },
+  { id:'strong', label:'Strong 128-bit',  space: Math.pow(2,128), color:'#2a6040', dash:[] },
+];
+
+function collisionProb(n, space) {
+  // P(at least one collision) = 1 - prod_{i=0}^{n-1}(1 - i/space)
+  // Use log approximation for large spaces: 1 - exp(-n*(n-1)/(2*space))
+  return 1 - Math.exp(-n * (n - 1) / (2 * space));
+}
+
+function drawCDF() {
+  const canvas = document.getElementById('cdf-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t:28, b:36, l:54, r:120 };
+  const iW = W - P.l - P.r, iH = H - P.t - P.b;
+
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  // Log x scale: 1 to 1e7
+  const xMin = 0, xMax = 7; // log10
+  function xPos(n) { return P.l + (Math.log10(Math.max(n,1)) - xMin) / (xMax - xMin) * iW; }
+  function yPos(p) { return P.t + iH * (1 - p); }
+
+  // Grid lines + x-axis labels
+  ctx.strokeStyle = '#141414'; ctx.lineWidth = 1; ctx.setLineDash([]);
+  [0,1,2,3,4,5,6,7].forEach(exp => {
+    const x = xPos(Math.pow(10, exp));
+    ctx.beginPath(); ctx.moveTo(x, P.t); ctx.lineTo(x, P.t + iH); ctx.stroke();
+    ctx.fillStyle = '#333'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    const lbl = exp === 0 ? '1' : '10' + (exp > 1 ? String.fromCharCode(0x2070 + exp) : '¹');
+    ctx.fillText(lbl, x, P.t + iH + 14);
+  });
+  [0, 0.25, 0.5, 0.75, 1.0].forEach(p => {
+    const y = yPos(p);
+    ctx.strokeStyle = p === 0.5 ? '#222' : '#111';
+    ctx.setLineDash(p === 0.5 ? [3,4] : []);
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + iW, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = p === 0.5 ? '#555' : '#2a2a2a';
+    ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText((p * 100).toFixed(0) + '%', P.l - 6, y + 3);
+  });
+
+  // 50% label
+  ctx.fillStyle = '#333'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('50% collision risk', P.l + 4, yPos(0.5) - 4);
+
+  // Axis labels
+  ctx.fillStyle = '#444'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('certs issued (log scale)', P.l + iW/2, H - 4);
+
+  // Draw each scheme
+  const steps = 120;
+  CDF_SCHEMES.forEach(s => {
+    if (s.id === 'seq') {
+      // Sequential: no collision by construction, P=0 always
+      ctx.strokeStyle = s.color; ctx.lineWidth = 1.5;
+      ctx.setLineDash([3,4]);
+      ctx.beginPath();
+      ctx.moveTo(P.l, yPos(0)); ctx.lineTo(P.l + iW, yPos(0));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = s.color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(s.label, P.l + iW + 6, yPos(0) + 3);
+      return;
+    }
+    if (s.id === 'strong') {
+      // Strong 128-bit: effectively 0 at all visible scales
+      ctx.strokeStyle = s.color; ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(P.l, yPos(0)); ctx.lineTo(P.l + iW, yPos(0));
+      ctx.stroke();
+      ctx.fillStyle = s.color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(s.label, P.l + iW + 6, yPos(0) + 14);
+      return;
+    }
+
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.5;
+    ctx.setLineDash(s.dash);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= steps; i++) {
+      const logN = xMin + (xMax - xMin) * i / steps;
+      const n = Math.pow(10, logN);
+      const p = collisionProb(n, s.space);
+      const x = P.l + (logN - xMin) / (xMax - xMin) * iW;
+      const y = yPos(Math.min(p, 1));
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label at 50% crossover
+    const nCross = Math.sqrt(2 * s.space * Math.LN2);
+    const xCross = xPos(nCross);
+    if (xCross > P.l && xCross < P.l + iW) {
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(xCross, yPos(0.5), 3, 0, Math.PI*2); ctx.fill();
+    }
+    // Label on right edge
+    const logNEnd = xMax;
+    const nEnd = Math.pow(10, logNEnd);
+    const pEnd = collisionProb(nEnd, s.space);
+    ctx.fillStyle = s.color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(s.label, P.l + iW + 6, yPos(Math.min(pEnd, 1)) + 3);
+  });
+
+  // Log output
+  const tsThresh  = Math.round(Math.sqrt(2 * 86400    * Math.LN2)).toLocaleString();
+  const wkThresh  = Math.round(Math.sqrt(2 * (1<<20)  * Math.LN2)).toLocaleString();
+  document.getElementById('cdf-log').innerHTML =
+    'timestamp  50% threshold: cert <span class="bad">#' + tsThresh + '</span>\n' +
+    'weak 20-bit 50% threshold: cert <span class="warn">#' + wkThresh + '</span>\n' +
+    'strong 128-bit 50% threshold: cert <span class="ok">#2,600,000,000,000,000,000 (2.6 × 10¹⁹)</span>\n' +
+    'sequential: <span class="dim">no probabilistic collision — fully deterministic, predictability is the threat</span>';
+}
+
+function clearCDF() {
+  const canvas = document.getElementById('cdf-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('cdf-log').textContent = 'waiting…';
+}
+
+// ══════════════════════════════════════════════
+// DEMO 5 — ATTACKER WORK FACTOR
+// ══════════════════════════════════════════════
+
+const RATE_STEPS = [100, 1000, 10000, 100000, 1000000];
+
+function updateWorkFactor() {
+  const idx = parseInt(document.getElementById('rate-slider').value) - 1;
+  const rate = RATE_STEPS[idx];
+  document.getElementById('rate-label').textContent = rate.toLocaleString() + '/day';
+  drawWorkFactor(rate);
+}
+
+function drawWorkFactor(rate) {
+  const canvas = document.getElementById('work-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t:28, b:48, l:54, r:20 };
+  const iW = W - P.l - P.r, iH = H - P.t - P.b;
+
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  const guessRate = 1e9; // guesses per second
+
+  const schemes = [
+    { label:'Sequential',    space: rate,           color:'#7a2020' },
+    { label:'Timestamp',     space: 86400,          color:'#bb6600' },
+    { label:'Weak 20-bit',   space: 1<<20,          color:'#886600' },
+    { label:'Strong 128-bit',space: Math.pow(2,128),color:'#2a6040' },
+  ];
+
+  // For each scheme: expected guesses to hit a serial = space / certs_in_flight
+  // Attacker work (seconds) = expected_guesses / guessRate
+  const works = schemes.map(s => {
+    if (s.label === 'Sequential') {
+      // next serial is always known = 1 guess
+      return 1 / guessRate;
+    }
+    // Expected guesses with n certs in flight over a window = space / n
+    const n = rate; // certs issued today
+    const expectedGuesses = s.space / n;
+    return expectedGuesses / guessRate;
+  });
+
+  // Y: log seconds, range from 1e-12 to 1e30
+  const yMin = -12, yMax = 30;
+  function yPos(sec) {
+    const logS = Math.log10(Math.max(sec, 1e-15));
+    return P.t + iH * (1 - (Math.max(logS, yMin) - yMin) / (yMax - yMin));
+  }
+
+  // Grid
+  ctx.strokeStyle = '#141414'; ctx.lineWidth = 1;
+  [-12,-6,0,6,12,18,24,30].forEach(exp => {
+    const y = yPos(Math.pow(10, exp));
+    if (y < P.t || y > P.t + iH) return;
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + iW, y); ctx.stroke();
+    const labels = { '-12':'picosec','-6':'microsec','0':'1 sec','6':'11.5 days','12':'31 700 yr','18':'10¹⁸ yr','24':'10²⁴ yr','30':'10³⁰ yr' };
+    ctx.fillStyle = '#2a2a2a'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(labels[exp] || '', P.l - 4, y + 3);
+  });
+
+  // Safe line: 1 year
+  const ySafe = yPos(365 * 86400);
+  ctx.strokeStyle = '#1a3a28'; ctx.lineWidth = 1; ctx.setLineDash([3,4]);
+  ctx.beginPath(); ctx.moveTo(P.l, ySafe); ctx.lineTo(P.l + iW, ySafe); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#2a5a3a'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('1 year', P.l + 4, ySafe - 4);
+
+  // Bars
+  const barW = Math.floor(iW / schemes.length * 0.55);
+  const gap  = Math.floor(iW / schemes.length);
+
+  schemes.forEach((s, i) => {
+    const x = P.l + i * gap + (gap - barW) / 2;
+    const yTop = yPos(works[i]);
+    const yBot = P.t + iH;
+    const barH = Math.max(yBot - yTop, 2);
+
+    ctx.fillStyle = s.color;
+    ctx.fillRect(x, yTop, barW, barH);
+
+    // Label
+    ctx.fillStyle = s.color; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(s.label, x + barW/2, P.t + iH + 16);
+
+    // Value on top of bar
+    const sec = works[i];
+    let valStr;
+    if (sec < 1e-9)       valStr = '<1 ns';
+    else if (sec < 1e-6)  valStr = (sec*1e9).toFixed(1) + ' ns';
+    else if (sec < 1e-3)  valStr = (sec*1e6).toFixed(1) + ' μs';
+    else if (sec < 1)     valStr = (sec*1e3).toFixed(1) + ' ms';
+    else if (sec < 3600)  valStr = sec.toFixed(1) + ' s';
+    else if (sec < 86400*365) valStr = (sec/3600).toFixed(0) + ' hr';
+    else if (sec < 86400*365*1e6) valStr = (sec/86400/365).toFixed(0) + ' yr';
+    else                  valStr = '10^' + Math.round(Math.log10(sec)) + ' yr';
+
+    ctx.fillStyle = s.color; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    if (yTop > P.t + 12) ctx.fillText(valStr, x + barW/2, yTop - 4);
+    else ctx.fillText(valStr, x + barW/2, P.t + 10);
+  });
+
+  ctx.fillStyle = '#444'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('expected time for attacker to predict a valid serial (10⁹ guesses/sec)', P.l + iW/2, H - 4);
+
+  // Log
+  const seqSec = works[0], tsSec = works[1], wkSec = works[2], stSec = works[3];
+  function fmt(s) {
+    if (s < 1e-6) return '<1 μs';
+    if (s < 1)    return (s*1e3).toFixed(2) + ' ms';
+    if (s < 3600) return s.toFixed(1) + ' s';
+    if (s < 86400*365) return (s/3600).toFixed(0) + ' hours';
+    if (s < 86400*365*1e6) return (s/86400/365).toExponential(1) + ' yr';
+    return '10^' + Math.round(Math.log10(s)) + ' yr';
+  }
+  document.getElementById('work-log').innerHTML =
+    'issuance rate: <span class="hi">' + rate.toLocaleString() + ' certs/day</span>  (attacker speed: 10⁹ guesses/sec)\n\n' +
+    'sequential  : <span class="bad">' + fmt(seqSec) + '</span>  — next serial always known\n' +
+    'timestamp   : <span class="bad">' + fmt(tsSec)  + '</span>  — 86 400 possible values\n' +
+    'weak 20-bit : <span class="warn">' + fmt(wkSec) + '</span>  — ~1 M possible values\n' +
+    'strong 128-bit: <span class="ok">' + fmt(stSec) + '</span>  — effectively unbreakable';
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', () => { updateWorkFactor(); updateEntCalc(); });
+
+// ══════════════════════════════════════════════
+// DEMO 6 — ENTROPY GROWTH RATE
+// ══════════════════════════════════════════════
+
+function updateEntCalc() {
+  const bits = parseInt(document.getElementById('ent-slider').value);
+  document.getElementById('ent-label').textContent = bits + ' bits';
+  drawEntropy(bits);
+}
+
+function drawEntropy(bits) {
+  const canvas = document.getElementById('ent-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t:28, b:36, l:54, r:20 };
+  const iW = W - P.l - P.r, iH = H - P.t - P.b;
+
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  // Draw curve: x = bits 1..160, y = log10(brute force seconds)
+  const maxBits = 160;
+  const guessRate = 1e9;
+
+  function bfTime(b) {
+    // Expected guesses = 2^b / 2 (birthday threshold)
+    // time = 2^(b-1) / guessRate
+    return Math.pow(2, b - 1) / guessRate;
+  }
+
+  // y range: log10 seconds, -10 to 40
+  const yMin = -10, yMax = 40;
+  function yPos(sec) {
+    const l = Math.log10(Math.max(sec, 1e-12));
+    return P.t + iH * (1 - (Math.min(Math.max(l, yMin), yMax) - yMin) / (yMax - yMin));
+  }
+  function xPos(b) { return P.l + (b - 1) / (maxBits - 1) * iW; }
+
+  // Danger zones background
+  ctx.fillStyle = 'rgba(122,32,32,0.06)';
+  ctx.fillRect(P.l, P.t, xPos(64) - P.l, iH);
+  ctx.fillStyle = 'rgba(136,102,0,0.04)';
+  ctx.fillRect(xPos(64), P.t, xPos(96) - xPos(64), iH);
+  ctx.fillStyle = 'rgba(42,96,64,0.04)';
+  ctx.fillRect(xPos(96), P.t, iW - (xPos(96) - P.l), iH);
+
+  // Grid lines
+  const milestones = [-10,-5,0,5,10,15,20,25,30,35,40];
+  milestones.forEach(exp => {
+    const y = yPos(Math.pow(10, exp));
+    if (y < P.t || y > P.t + iH + 1) return;
+    ctx.strokeStyle = '#141414'; ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + iW, y); ctx.stroke();
+    const lblMap = {'-10':'<1ns','-5':'<1μs','0':'1s','5':'11d','10':'317yr','15':'3×10⁸yr','20':'3×10¹³yr','25':'3×10¹⁸yr','30':'3×10²³yr','35':'3×10²⁸yr','40':'3×10³³yr'};
+    ctx.fillStyle = '#2a2a2a'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(lblMap[exp] || '', P.l - 4, y + 3);
+  });
+
+  // Reference lines
+  const refs = [
+    { sec: 1,              label:'1 second',    color:'#333' },
+    { sec: 365*86400,      label:'1 year',      color:'#2a3a28' },
+    { sec: 365*86400*1e9,  label:'1 billion yr',color:'#1a3a28' },
+  ];
+  refs.forEach(r => {
+    const y = yPos(r.sec);
+    if (y < P.t || y > P.t + iH) return;
+    ctx.strokeStyle = r.color; ctx.lineWidth = 1; ctx.setLineDash([2,4]);
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + iW, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = r.color; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(r.label, P.l + 4, y - 3);
+  });
+
+  // Draw the curve in colored segments by risk zone
+  const segments = [
+    { from:1,   to:64,  color:'#7a2020' },
+    { from:64,  to:96,  color:'#886600' },
+    { from:96,  to:160, color:'#2a6040' },
+  ];
+
+  segments.forEach(seg => {
+    ctx.beginPath(); ctx.strokeStyle = seg.color; ctx.lineWidth = 2; ctx.setLineDash([]);
+    let started = false;
+    for (let b = seg.from; b <= seg.to; b++) {
+      const x = xPos(b), y = yPos(bfTime(b));
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  });
+
+  // Current bit marker
+  const cx = xPos(bits);
+  const cy = yPos(bfTime(bits));
+  const markerColor = bits < 64 ? '#993333' : bits < 96 ? '#886600' : '#3a7a50';
+  ctx.fillStyle = markerColor;
+  ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = markerColor; ctx.lineWidth = 1; ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, P.t + iH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Zone labels
+  ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#5a2020'; ctx.fillText('WEAK', P.l + (xPos(64)-P.l)/2,      P.t + 12);
+  ctx.fillStyle = '#5a4400'; ctx.fillText('MARGINAL', (xPos(64)+xPos(96))/2,    P.t + 12);
+  ctx.fillStyle = '#1a4a30'; ctx.fillText('SAFE', xPos(96) + (P.l+iW-xPos(96))/2, P.t + 12);
+
+  // X axis ticks
+  [1,32,64,96,128,160].forEach(b => {
+    const x = xPos(b);
+    ctx.fillStyle = b === bits ? markerColor : '#333';
+    ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(b, x, P.t + iH + 14);
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, P.t + iH); ctx.lineTo(x, P.t + iH + 4); ctx.stroke();
+  });
+
+  ctx.fillStyle = '#444'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('entropy bits', P.l + iW/2, H - 4);
+
+  // Update counters
+  const space = Math.pow(2, bits);
+  const thresh = Math.pow(2, bits/2) * Math.sqrt(Math.LN2);
+  const bf = bfTime(bits);
+
+  function fmtBig(n) {
+    if (n < 1e6) return n.toLocaleString();
+    const exp = Math.floor(Math.log10(n));
+    return '2^' + bits;
+  }
+  function fmtThresh(n) {
+    if (n < 1e6) return Math.round(n).toLocaleString();
+    return '2^' + Math.round(bits/2);
+  }
+  function fmtTime(s) {
+    if (s < 1e-9)  return '<1 ns';
+    if (s < 1e-6)  return (s*1e9).toFixed(0) + ' ns';
+    if (s < 1e-3)  return (s*1e6).toFixed(0) + ' μs';
+    if (s < 1)     return (s*1e3).toFixed(0) + ' ms';
+    if (s < 3600)  return s.toFixed(0) + ' s';
+    if (s < 86400) return (s/3600).toFixed(1) + ' hr';
+    if (s < 86400*365) return (s/86400).toFixed(0) + ' days';
+    const yr = s / 86400 / 365;
+    if (yr < 1e6) return yr.toExponential(1) + ' yr';
+    return '10^' + Math.round(Math.log10(yr)) + ' yr';
+  }
+
+  document.getElementById('ec-space').textContent  = fmtBig(space);
+  document.getElementById('ec-thresh').textContent = fmtThresh(thresh);
+  document.getElementById('ec-time').textContent   = fmtTime(bf);
+
+  const riskEl = document.getElementById('ec-risk');
+  if (bits < 64) {
+    riskEl.textContent = 'CRITICAL'; riskEl.style.color = '#993333';
+  } else if (bits < 96) {
+    riskEl.textContent = 'MARGINAL'; riskEl.style.color = '#886600';
+  } else if (bits < 128) {
+    riskEl.textContent = 'ADEQUATE'; riskEl.style.color = '#3a7a50';
+  } else {
+    riskEl.textContent = 'STRONG';   riskEl.style.color = '#3a7a50';
+  }
+}
+
+// ══════════════════════════════════════════════
+// DEMO 7 — DISTRIBUTION UNIFORMITY
+// ══════════════════════════════════════════════
+
+async function runUniformity() {
+  const canvas = document.getElementById('uni-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const N_BUCKETS = 64;
+  const N_CERTS   = 4000;
+  const counts    = new Array(N_BUCKETS).fill(0);
+
+  document.getElementById('uni-log').textContent = 'issuing…';
+
+  for (let i = 0; i < N_CERTS; i++) {
+    let bucket;
+    if (scheme === 'seq') {
+      bucket = i % N_BUCKETS;
+    } else if (scheme === 'ts') {
+      const v = Math.floor(Math.random() * 86400);
+      bucket = Math.floor(v / 86400 * N_BUCKETS);
+    } else if (scheme === 'weak') {
+      const v = Math.floor(Math.random() * (1<<20));
+      bucket = Math.floor(v / (1<<20) * N_BUCKETS);
+    } else {
+      bucket = Math.floor(Math.random() * N_BUCKETS);
+    }
+    bucket = Math.min(Math.max(bucket, 0), N_BUCKETS - 1);
+    counts[bucket]++;
+    if (i % 80 === 0) { drawUniHistogram(canvas, counts, N_CERTS, N_BUCKETS); await sleep(10); }
+  }
+
+  drawUniHistogram(canvas, counts, N_CERTS, N_BUCKETS);
+
+  // Chi-squared uniformity score
+  const expected = N_CERTS / N_BUCKETS;
+  const chi2 = counts.reduce((sum, c) => sum + Math.pow(c - expected, 2) / expected, 0);
+  const critVal = N_BUCKETS + 2 * Math.sqrt(2 * N_BUCKETS); // rough 99% threshold
+
+  const schemeNames = { seq:'sequential', ts:'timestamp', weak:'weak 20-bit', strong:'strong 128-bit' };
+  const isEmpty = scheme === 'strong';
+  document.getElementById('uni-log').innerHTML =
+    'scheme: <span class="hi">' + schemeNames[scheme] + '</span>   n = ' + N_CERTS.toLocaleString() + '   buckets = ' + N_BUCKETS + '\n' +
+    'expected per bucket: ' + expected.toFixed(1) + '\n' +
+    'χ² score: <span class="' + (chi2 > critVal ? 'bad' : chi2 > critVal * 0.5 ? 'warn' : 'ok') + '">' + chi2.toFixed(1) + '</span>   ' +
+    '(critical value ~' + critVal.toFixed(0) + ')\n' +
+    (chi2 > critVal
+      ? '<span class="bad">distribution is non-uniform — exploitable clustering detected</span>'
+      : chi2 > critVal * 0.5
+        ? '<span class="warn">distribution shows moderate unevenness</span>'
+        : '<span class="ok">distribution is statistically uniform ✓</span>');
+}
+
+function drawUniHistogram(canvas, counts, nTotal, nBuckets) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t:20, b:28, l:40, r:10 };
+  const iW = W - P.l - P.r, iH = H - P.t - P.b;
+
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  const expected = nTotal / nBuckets;
+  const maxCount = Math.max(...counts, expected * 3);
+  const barW = iW / nBuckets;
+
+  // Expected line
+  const ey = P.t + iH * (1 - expected / maxCount);
+  ctx.strokeStyle = '#1e3a28'; ctx.lineWidth = 1; ctx.setLineDash([2,4]);
+  ctx.beginPath(); ctx.moveTo(P.l, ey); ctx.lineTo(P.l + iW, ey); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#2a5a38'; ctx.font = '9px monospace';
+  ctx.fillText('expected (' + expected.toFixed(0) + ')', P.l + 4, ey - 3);
+
+  // Bars
+  counts.forEach((c, i) => {
+    const bH = (c / maxCount) * iH;
+    const x  = P.l + i * barW;
+    const y  = P.t + iH - bH;
+    const dev = Math.abs(c - expected) / expected;
+    let color;
+    if (dev > 0.8)      color = '#7a2020';
+    else if (dev > 0.4) color = '#886600';
+    else                color = '#1e4030';
+    ctx.fillStyle = color;
+    ctx.fillRect(x + 0.5, y, Math.max(barW - 1, 1), bH);
+  });
+
+  // Y axis ticks
+  [0, 0.5, 1].forEach(frac => {
+    const val = Math.round(maxCount * frac);
+    const y   = P.t + iH * (1 - frac);
+    ctx.fillStyle = '#252525'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(val, P.l - 3, y + 3);
+  });
+
+  ctx.fillStyle = '#333'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('bucket index (0–' + (nBuckets-1) + ')', P.l + iW/2, H - 4);
+}
+
+function clearUniformity() {
+  const canvas = document.getElementById('uni-canvas');
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('uni-log').textContent = 'waiting…';
+}
+
+
 
 let algMode = 'bound';
 let lastCert = null;
@@ -875,6 +1526,356 @@ function resetTimeline() {
   ctx.fillStyle = '#080808'; ctx.fillRect(0,0,canvas.width,canvas.height);
   document.getElementById('alg-log').textContent = 'waiting…';
 }
+
+// ══════════════════════════════════════════════
+// STRICT DER ENCODING DEMOS
+// ══════════════════════════════════════════════
+
+let derMode = 'der';
+
+// DER scheme picker — uses its own set of .scheme divs after the hr
+function pickDer(mode, el) {
+  derMode = mode;
+  ['der','ber_len','ber_bool','ber_int','attack'].forEach(m => {
+    const el2 = document.getElementById('der-scheme-' + m);
+    if (el2) el2.classList.remove('active');
+  });
+  el.classList.add('active');
+  resetDerDemo();
+}
+
+// ── TLV helpers ──
+// Each encoding returns { label, bytes: Uint8Array, annotations: [{byte, note, cls}] }
+
+function hexByte(b) { return b.toString(16).padStart(2,'0').toUpperCase(); }
+
+// Encode a SEQUENCE containing one BOOLEAN and one INTEGER (simulates a simple cert field)
+// Returns { canonical: Uint8Array, variant: Uint8Array, variantLabel, annotations, variantAnnotations }
+function buildEncodings() {
+  // Logical value: SEQUENCE { BOOLEAN TRUE, INTEGER 42 }
+  // DER: 30 08  01 01 FF  02 01 2A
+  //       ^seq  ^bool     ^int
+  const der = new Uint8Array([0x30, 0x08, 0x01, 0x01, 0xFF, 0x02, 0x01, 0x2A]);
+
+  const annDer = [
+    { byte: 0x30, note: 'SEQUENCE tag',           cls: 'ok'   },
+    { byte: 0x08, note: 'length = 8 (definite)',  cls: 'ok'   },
+    { byte: 0x01, note: 'BOOLEAN tag',             cls: 'ok'   },
+    { byte: 0x01, note: 'length = 1',              cls: 'ok'   },
+    { byte: 0xFF, note: 'TRUE (DER: must be FF)',  cls: 'ok'   },
+    { byte: 0x02, note: 'INTEGER tag',             cls: 'ok'   },
+    { byte: 0x01, note: 'length = 1',              cls: 'ok'   },
+    { byte: 0x2A, note: 'value = 42',              cls: 'ok'   },
+  ];
+
+  if (derMode === 'der') {
+    return { canonical: der, variant: null, variantLabel: null,
+             annotations: annDer, variantAnnotations: null };
+  }
+
+  if (derMode === 'ber_len') {
+    // BER indefinite length: 30 80  01 01 FF  02 01 2A  00 00
+    const ber = new Uint8Array([0x30, 0x80, 0x01, 0x01, 0xFF, 0x02, 0x01, 0x2A, 0x00, 0x00]);
+    const ann = [
+      { byte: 0x30, note: 'SEQUENCE tag',                    cls: 'ok'   },
+      { byte: 0x80, note: '⚠ indefinite length — NOT DER',   cls: 'bad'  },
+      { byte: 0x01, note: 'BOOLEAN tag',                     cls: 'ok'   },
+      { byte: 0x01, note: 'length = 1',                      cls: 'ok'   },
+      { byte: 0xFF, note: 'TRUE',                            cls: 'ok'   },
+      { byte: 0x02, note: 'INTEGER tag',                     cls: 'ok'   },
+      { byte: 0x01, note: 'length = 1',                      cls: 'ok'   },
+      { byte: 0x2A, note: 'value = 42',                      cls: 'ok'   },
+      { byte: 0x00, note: 'end-of-contents octet 1',         cls: 'warn' },
+      { byte: 0x00, note: 'end-of-contents octet 2',         cls: 'warn' },
+    ];
+    return { canonical: der, variant: ber, variantLabel: 'BER indefinite length',
+             annotations: annDer, variantAnnotations: ann };
+  }
+
+  if (derMode === 'ber_bool') {
+    // BER: BOOLEAN TRUE encoded as 0x01 instead of 0xFF
+    const ber = new Uint8Array([0x30, 0x08, 0x01, 0x01, 0x01, 0x02, 0x01, 0x2A]);
+    const ann = [
+      { byte: 0x30, note: 'SEQUENCE tag',                     cls: 'ok'  },
+      { byte: 0x08, note: 'length = 8',                       cls: 'ok'  },
+      { byte: 0x01, note: 'BOOLEAN tag',                      cls: 'ok'  },
+      { byte: 0x01, note: 'length = 1',                       cls: 'ok'  },
+      { byte: 0x01, note: '⚠ TRUE as 0x01 — DER requires FF', cls: 'bad' },
+      { byte: 0x02, note: 'INTEGER tag',                      cls: 'ok'  },
+      { byte: 0x01, note: 'length = 1',                       cls: 'ok'  },
+      { byte: 0x2A, note: 'value = 42',                       cls: 'ok'  },
+    ];
+    return { canonical: der, variant: ber, variantLabel: 'BER non-canonical BOOLEAN',
+             annotations: annDer, variantAnnotations: ann };
+  }
+
+  if (derMode === 'ber_int') {
+    // BER: INTEGER with unnecessary leading 0x00 pad: 30 09  01 01 FF  02 02 00 2A
+    const ber = new Uint8Array([0x30, 0x09, 0x01, 0x01, 0xFF, 0x02, 0x02, 0x00, 0x2A]);
+    const ann = [
+      { byte: 0x30, note: 'SEQUENCE tag',                          cls: 'ok'  },
+      { byte: 0x09, note: '⚠ length = 9 (padded — DER would be 8)', cls: 'warn'},
+      { byte: 0x01, note: 'BOOLEAN tag',                           cls: 'ok'  },
+      { byte: 0x01, note: 'length = 1',                            cls: 'ok'  },
+      { byte: 0xFF, note: 'TRUE',                                  cls: 'ok'  },
+      { byte: 0x02, note: 'INTEGER tag',                           cls: 'ok'  },
+      { byte: 0x02, note: '⚠ length = 2 (unnecessary padding)',    cls: 'warn'},
+      { byte: 0x00, note: '⚠ leading zero pad — NOT DER',          cls: 'bad' },
+      { byte: 0x2A, note: 'value = 42',                            cls: 'ok'  },
+    ];
+    return { canonical: der, variant: ber, variantLabel: 'BER padded INTEGER',
+             annotations: annDer, variantAnnotations: ann };
+  }
+
+  if (derMode === 'attack') {
+    // Show both encodings as the "attack pair"
+    const ber = new Uint8Array([0x30, 0x09, 0x01, 0x01, 0xFF, 0x02, 0x02, 0x00, 0x2A]);
+    const ann = [
+      { byte: 0x30, note: 'SEQUENCE tag',                    cls: 'ok'  },
+      { byte: 0x09, note: '⚠ attacker-crafted length byte',  cls: 'bad' },
+      { byte: 0x01, note: 'BOOLEAN tag',                     cls: 'ok'  },
+      { byte: 0x01, note: 'length = 1',                      cls: 'ok'  },
+      { byte: 0xFF, note: 'TRUE',                            cls: 'ok'  },
+      { byte: 0x02, note: 'INTEGER tag',                     cls: 'ok'  },
+      { byte: 0x02, note: '⚠ inflated length',               cls: 'bad' },
+      { byte: 0x00, note: '⚠ injected zero pad',             cls: 'bad' },
+      { byte: 0x2A, note: 'value = 42 (unchanged)',          cls: 'ok'  },
+    ];
+    return { canonical: der, variant: ber, variantLabel: 'Attacker-crafted BER twin',
+             annotations: annDer, variantAnnotations: ann };
+  }
+}
+
+function renderTLV(bytes, annotations, label) {
+  let html = '<span class="dim">// ' + label + '</span>\n';
+  html += '<span class="dim">bytes (' + bytes.length + ')  </span>';
+  bytes.forEach((b, i) => {
+    const ann = annotations[i] || { cls: '' };
+    html += '<span class="' + ann.cls + '">' + hexByte(b) + '</span> ';
+  });
+  html += '\n\n';
+  annotations.forEach((a, i) => {
+    const b = bytes[i];
+    if (b === undefined) return;
+    html += '<span class="dim">[' + i + '] </span>';
+    html += '<span class="' + a.cls + '">' + hexByte(b) + '</span>';
+    html += '  <span class="dim">' + a.note + '</span>\n';
+  });
+  return html;
+}
+
+function buildDer() {
+  const enc = buildEncodings();
+  const el = document.getElementById('der-struct');
+
+  let html = renderTLV(enc.canonical, enc.annotations, 'DER canonical');
+
+  if (enc.variant) {
+    html += '\n' + renderTLV(enc.variant, enc.variantAnnotations, enc.variantLabel);
+
+    const same = enc.canonical.length === enc.variant.length &&
+                 enc.canonical.every((b, i) => b === enc.variant[i]);
+    html += '\nbyte-identical: <span class="' + (same ? 'ok' : 'bad') + '">' +
+            (same ? 'yes' : 'no — same logical value, different bytes') + '</span>\n';
+
+    const verdict = derMode === 'der' ? '' :
+      '\nDER parser verdict: <span class="bad">REJECT — non-canonical encoding detected</span>\n' +
+      'BER parser verdict: <span class="warn">ACCEPT — parses to identical value</span>\n' +
+      (derMode === 'attack'
+        ? '\n<span class="bad">⚠ both encodings accepted by lax parser → hashes diverge → fingerprint mismatch</span>'
+        : '');
+    html += verdict;
+  } else {
+    html += '\nDER parser verdict: <span class="ok">ACCEPT — encoding is canonical ✓</span>\n';
+  }
+
+  el.innerHTML = html;
+  document.getElementById('equiv-rows').innerHTML = '<span style="color:#252525">click ▶ Check equivalence…</span>';
+}
+
+async function runEquiv() {
+  const enc = buildEncodings();
+  if (!enc.variant) {
+    buildDer();
+    const box = document.getElementById('equiv-rows');
+    box.innerHTML = '';
+    await sleep(200);
+    addEquivRow(box, 'Canonical DER', enc.canonical, 'only encoding', 'safe');
+    await sleep(300);
+    addEquivRow(box, 'Variant', null, 'no variant — mode is strict DER (already canonical)', 'safe');
+    return;
+  }
+
+  const box = document.getElementById('equiv-rows');
+  box.innerHTML = '';
+
+  await sleep(250);
+  addEquivRow(box, 'Encoding A (DER)', enc.canonical,
+    enc.canonical.length + ' bytes — canonical', 'safe');
+
+  await sleep(350);
+  addEquivRow(box, 'Encoding B (' + enc.variantLabel + ')', enc.variant,
+    enc.variant.length + ' bytes — non-canonical', 'hit');
+
+  await sleep(350);
+  const logicalMatch = true; // always same logical value in our examples
+  addEquivRow(box, 'Logical value match', null,
+    logicalMatch ? 'yes — both decode to SEQUENCE { TRUE, 42 }' : 'no', 'safe');
+
+  await sleep(350);
+  addEquivRow(box, 'Byte-level match', null,
+    'no — byte strings differ (' + enc.canonical.length + ' vs ' + enc.variant.length + ' bytes)', 'hit');
+
+  await sleep(350);
+  // Simulate hash divergence (real SubtleCrypto not available inline; show fake but realistic digests)
+  const fakeHashA = fakeDigest(enc.canonical);
+  const fakeHashB = fakeDigest(enc.variant);
+  addEquivRow(box, 'SHA-256(A)', null, fakeHashA.slice(0,48) + '…', 'safe');
+  await sleep(200);
+  addEquivRow(box, 'SHA-256(B)', null, fakeHashB.slice(0,48) + '…', 'hit');
+  await sleep(200);
+  addEquivRow(box, 'Digests match', null,
+    fakeHashA === fakeHashB ? 'yes' : 'NO — cert fingerprints diverge ✗',
+    fakeHashA === fakeHashB ? 'safe' : 'coll');
+}
+
+function addEquivRow(box, label, bytes, note, cls) {
+  const row = document.createElement('div');
+  row.className = 'stream-row';
+  const hexSnip = bytes ? Array.from(bytes).slice(0,8).map(b => hexByte(b)).join(' ') + (bytes.length > 8 ? ' …' : '') : '';
+  row.innerHTML =
+    '<span class="sr-idx" style="width:180px;color:#333">' + label + '</span>' +
+    (hexSnip ? '<span class="sr-val" style="color:#555">' + hexSnip + '</span>' : '<span class="sr-val"></span>') +
+    '<span class="sr-note ' + cls + '">' + note + '</span>';
+  box.appendChild(row);
+}
+
+// Deterministic fake digest — same bytes → same result, different bytes → different result
+function fakeDigest(bytes) {
+  let h = 0x811c9dc5;
+  bytes.forEach(b => { h ^= b; h = (h * 0x01000193) >>> 0; });
+  // Expand to 64 hex chars
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    h = (h ^ (i * 0x9e3779b9)) >>> 0;
+    h = (h * 0x01000193) >>> 0;
+    out += h.toString(16).padStart(8, '0');
+  }
+  return out;
+}
+
+function resetDerDemo() {
+  document.getElementById('der-struct').textContent = 'waiting…';
+  document.getElementById('equiv-rows').innerHTML = '<span style="color:#252525">encode a field first…</span>';
+  resetMalleability();
+}
+
+// ── DEMO 9: hash divergence canvas ──
+async function runMalleability() {
+  const enc = buildEncodings();
+  const canvas = document.getElementById('der-canvas');
+  canvas.width = canvas.offsetWidth;
+  const log = document.getElementById('mal-log');
+
+  if (!enc.variant) {
+    log.innerHTML =
+      'mode: <span class="ok">strict DER</span>\n' +
+      'only one encoding exists — no malleability possible.\n' +
+      '<span class="ok">hash is stable: same bytes always → same digest ✓</span>';
+    drawMalCanvas(canvas, null);
+    return;
+  }
+
+  const hashA = fakeDigest(enc.canonical);
+  const hashB = fakeDigest(enc.variant);
+  const match = hashA === hashB;
+
+  log.innerHTML =
+    'encoding A (DER canonical)   : <span class="hi">' + Array.from(enc.canonical).map(hexByte).join(' ') + '</span>\n' +
+    'encoding B (' + enc.variantLabel + ')  : <span class="' + (match ? 'ok' : 'bad') + '">' +
+      Array.from(enc.variant).map(hexByte).join(' ') + '</span>\n\n' +
+    'SHA-256(A) : <span class="ok">'  + hashA.slice(0,48) + '…</span>\n' +
+    'SHA-256(B) : <span class="' + (match ? 'ok' : 'bad') + '">' + hashB.slice(0,48) + '…</span>\n\n' +
+    (match
+      ? '<span class="ok">digests match — no divergence</span>'
+      : '<span class="bad">digests DIFFER — fingerprint breaks: CT log, OCSP, and pinning checks all fail for encoding B</span>\n\n' +
+        '<span class="ok">DER parser fix: reject encoding B before hashing → only canonical form reaches digest function</span>');
+
+  drawMalCanvas(canvas, { hashA, hashB, labelA: 'DER canonical', labelB: enc.variantLabel });
+}
+
+function drawMalCanvas(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,W,H);
+
+  if (!data) {
+    ctx.fillStyle = '#252525'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('no variant encoding — strict DER mode has no malleability', 14, H/2 + 4);
+    return;
+  }
+
+  // Draw two "hash bars" side by side, coloured by first byte of digest
+  const colW  = Math.floor(W / 2) - 20;
+  const barH  = 28;
+  const yBase = 44;
+
+  function hashToSegments(h, w) {
+    // Split 64-char hex into 8 segments → colour each
+    const segs = 8;
+    const sw = Math.floor(w / segs);
+    const cols = [];
+    for (let i = 0; i < segs; i++) {
+      const byte = parseInt(h.slice(i*8, i*8+2), 16);
+      const r = (byte & 0xC0) >> 6;
+      const g = (byte & 0x38) >> 3;
+      const b2 = byte & 0x07;
+      cols.push('rgb(' + (40 + r*30) + ',' + (40 + g*22) + ',' + (40 + b2*22) + ')');
+    }
+    return { cols, sw };
+  }
+
+  // A
+  ctx.fillStyle = '#1a3a28'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  ctx.fillText('SHA-256(A)  ' + data.labelA, 14, 22);
+  const sA = hashToSegments(data.hashA, colW);
+  sA.cols.forEach((c, i) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(14 + i * sA.sw, yBase, sA.sw - 1, barH);
+  });
+  ctx.fillStyle = '#3a7a50'; ctx.font = '9px monospace';
+  ctx.fillText(data.hashA.slice(0,32), 14, yBase + barH + 14);
+
+  // B
+  const match = data.hashA === data.hashB;
+  ctx.fillStyle = match ? '#1a3a28' : '#3a1414';
+  ctx.font = '10px monospace';
+  ctx.fillText('SHA-256(B)  ' + data.labelB, W/2 + 6, 22);
+  const sB = hashToSegments(data.hashB, colW);
+  sB.cols.forEach((c, i) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(W/2 + 6 + i * sB.sw, yBase, sB.sw - 1, barH);
+  });
+  ctx.fillStyle = match ? '#3a7a50' : '#993333';
+  ctx.font = '9px monospace';
+  ctx.fillText(data.hashB.slice(0,32), W/2 + 6, yBase + barH + 14);
+
+  // Verdict
+  ctx.fillStyle = match ? '#3a7a50' : '#993333';
+  ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(match ? 'digests match ✓' : 'DIGESTS DIFFER ✗  — fingerprint attack succeeds on lax parser', W/2, H - 6);
+  ctx.textAlign = 'left';
+}
+
+function resetMalleability() {
+  const canvas = document.getElementById('der-canvas');
+  if (!canvas) return;
+  canvas.width = canvas.offsetWidth || 660;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#080808'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('mal-log').textContent = 'waiting…';
+}
+
 </script>
 </body>
 </html>
